@@ -22,6 +22,8 @@ public:
 	void setThreshold(double threshold);
 	void setMinClusterPts(int min_cluster_pts);
 	void setMaxClusterPts(int max_cluster_pts);
+	void setBlockSizeX(int block_size);
+
 	// Matrix-based: Use adjacency matrix
 	void extractClusters();
 
@@ -39,12 +41,23 @@ public:
 
 	~GpuEuclideanCluster2();
 
+	// Measure the graph density
+	float density();
+
 private:
 	void initClusters();
 
 	void exclusiveScan(int *input, int ele_num, int *sum);
 
+	void exclusiveScan(long long int *input, int ele_num, long long int *sum);
+
+	template <typename T = int>
+	void exclusiveScan(T *input, int ele_num, T *sum);
+
 	void renamingClusters(int *cluster_names, int *cluster_location, int point_num);
+
+	// For testing only
+	void sparseGraphTest(int );
 
 	float *x_, *y_, *z_;
 	int point_num_;
@@ -54,6 +67,8 @@ private:
 	int min_cluster_pts_;
 	int max_cluster_pts_;
 	int cluster_num_;
+
+	int block_size_x_;
 };
 
 #ifndef BLOCK_SIZE_X

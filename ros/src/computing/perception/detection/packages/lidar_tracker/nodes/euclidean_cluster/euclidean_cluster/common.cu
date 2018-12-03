@@ -17,6 +17,8 @@ GpuEuclideanCluster2::GpuEuclideanCluster2()
 	min_cluster_pts_ = 0;
 	max_cluster_pts_ = INT_MAX;
 	cluster_num_ = 0;
+
+	block_size_x_ = 1024;
 }
 
 void GpuEuclideanCluster2::setThreshold(double threshold)
@@ -32,6 +34,15 @@ void GpuEuclideanCluster2::setMinClusterPts(int min_cluster_pts)
 void GpuEuclideanCluster2::setMaxClusterPts(int max_cluster_pts)
 {
 	max_cluster_pts_ = max_cluster_pts;
+}
+
+void GpuEuclideanCluster2::setBlockSizeX(int block_size)
+{
+	if (block_size > BLOCK_SIZE_X) {
+		block_size_x_ = BLOCK_SIZE_X;
+	} else {
+		block_size_x_ = block_size;
+	}
 }
 
 __global__ void convertFormat(pcl::PointXYZ *input, float *out_x, float *out_y, float *out_z, int point_num)
@@ -50,7 +61,18 @@ __global__ void convertFormat(pcl::PointXYZ *input, float *out_x, float *out_y, 
 
 void GpuEuclideanCluster2::exclusiveScan(int *input, int ele_num, int *sum)
 {
-	thrust::device_ptr<int> dev_ptr(input);
+	exclusiveScan<int>(input, ele_num, sum);
+}
+
+void GpuEuclideanCluster2::exclusiveScan(long long int *input, int ele_num, long long int *sum)
+{
+	exclusiveScan<long long int>(input, ele_num, sum);
+}
+
+template <typename T>
+void GpuEuclideanCluster2::exclusiveScan(T *input, int ele_num, T *sum)
+{
+	thrust::device_ptr<T> dev_ptr(input);
 
 	thrust::exclusive_scan(dev_ptr, dev_ptr + ele_num, dev_ptr);
 	checkCudaErrors(cudaGetLastError());
@@ -61,6 +83,15 @@ void GpuEuclideanCluster2::exclusiveScan(int *input, int ele_num, int *sum)
 
 void GpuEuclideanCluster2::setInputPoints(pcl::PointCloud<pcl::PointXYZ>::Ptr input)
 {
+	if (x_ != NULL)
+		checkCudaErrors(cudaFree(x_));
+
+	if (y_ != NULL)
+		checkCudaErrors(cudaFree(y_));
+
+	if (z_ != NULL)
+		checkCudaErrors(cudaFree(z_));
+
 	if (input->size() > 0) {
 		point_num_ = input->size();
 		checkCudaErrors(cudaMalloc(&x_, sizeof(float) * point_num_));
@@ -181,4 +212,118 @@ GpuEuclideanCluster2::~GpuEuclideanCluster2()
 		free(cluster_name_host_);
 	}
 }
+
+__global__ void edgeCountCommon(float *x, float *y, float *z, int point_num, int *edge_count, float threshold)
+{
+	__shared__ float local_x[BLOCK_SIZE_X];
+	__shared__ float local_y[BLOCK_SIZE_X];
+	__shared__ float local_z[BLOCK_SIZE_X];
+	int pid;
+	int last_point = (point_num / blockDim.x) * blockDim.x;	// Exclude the last block
+	float dist;
+
+	for (pid = threadIdx.x + blockIdx.x * blockDim.x; pid < last_point; pid += blockDim.x * gridDim.x) {
+		float tmp_x = x[pid];
+		float tmp_y = y[pid];
+		float tmp_z = z[pid];
+		int count = 0;
+
+		int block_id;
+
+		for (block_id = blockIdx.x * blockDim.x; block_id + blockDim.x < point_num; block_id += blockDim.x) {
+			local_x[threadIdx.x] = x[block_id + threadIdx.x];
+			local_y[threadIdx.x] = y[block_id + threadIdx.x];
+			local_z[threadIdx.x] = z[block_id + threadIdx.x];
+			__syncthreads();
+
+			for (int i = 0; i < blockDim.x; i++) {
+				dist = norm3df(tmp_x - local_x[i], tmp_y - local_y[i], tmp_z - local_z[i]);
+				count += (i + block_id > pid && dist < threshold) ? 1 : 0;
+			}
+			__syncthreads();
+		}
+
+		__syncthreads();
+
+		// Compare with last block
+		if (threadIdx.x < point_num - block_id) {
+			local_x[threadIdx.x] = x[block_id + threadIdx.x];
+			local_y[threadIdx.x] = y[block_id + threadIdx.x];
+			local_z[threadIdx.x] = z[block_id + threadIdx.x];
+		}
+		__syncthreads();
+
+		for (int i = 0; i < point_num - block_id; i++) {
+			dist = norm3df(tmp_x - local_x[i], tmp_y - local_y[i], tmp_z - local_z[i]);
+			count += (i + block_id > pid && dist < threshold) ? 1 : 0;
+		}
+
+		edge_count[pid] = count;
+		__syncthreads();
+	}
+	__syncthreads();
+
+
+	// Handle last block
+	if (pid >= last_point) {
+		int count = 0;
+		float tmp_x, tmp_y, tmp_z;
+
+		if (pid < point_num) {
+			tmp_x = x[pid];
+			tmp_y = y[pid];
+			tmp_z = z[pid];
+		}
+
+		int block_id = blockIdx.x * blockDim.x;
+
+		__syncthreads();
+
+		if (pid < point_num) {
+			local_x[threadIdx.x] = x[pid];
+			local_y[threadIdx.x] = y[pid];
+			local_z[threadIdx.x] = z[pid];
+			__syncthreads();
+
+			for (int i = 0; i < point_num - block_id; i++) {
+				dist = norm3df(tmp_x - local_x[i], tmp_y - local_y[i], tmp_z - local_z[i]);
+				count += (i + block_id > pid && dist < threshold) ? 1 : 0;
+			}
+			__syncthreads();
+
+			edge_count[pid] = count;
+		}
+	}
+}
+
+float GpuEuclideanCluster2::density(){
+
+	float result = 0;
+
+	int *edge_count;
+
+	checkCudaErrors(cudaMalloc(&edge_count, sizeof(int) * (point_num_ + 1)));
+
+	int block_x = (point_num_ > BLOCK_SIZE_X) ? BLOCK_SIZE_X : point_num_;
+	int grid_x = (point_num_ - 1) / block_x + 1;
+
+	edgeCountCommon<<<grid_x, block_x>>>(x_, y_, z_, point_num_, edge_count, threshold_);
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());
+
+	int edge_num = 0;
+
+	exclusiveScan(edge_count, point_num_ + 1, &edge_num);
+
+	std::cout << "Edge num = " << edge_num << std::endl;
+
+	float fpnum = static_cast<float>(point_num_);
+
+	result = static_cast<float>(edge_num) / (fpnum * (fpnum - 1));
+
+	checkCudaErrors(cudaFree(edge_count));
+
+	return result;
+}
+
 

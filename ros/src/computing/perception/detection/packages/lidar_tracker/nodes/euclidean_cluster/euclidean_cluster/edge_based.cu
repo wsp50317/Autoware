@@ -1,12 +1,14 @@
 #include "include/euclidean_cluster.h"
 #include <cuda.h>
 
+extern __shared__ float local_buff[];
+
 // Build edge set
 __global__ void edgeCount(float *x, float *y, float *z, int point_num, int *edge_count, float threshold)
 {
-	__shared__ float local_x[BLOCK_SIZE_X];
-	__shared__ float local_y[BLOCK_SIZE_X];
-	__shared__ float local_z[BLOCK_SIZE_X];
+	float *local_x = local_buff;
+	float *local_y = local_x + blockDim.x;
+	float *local_z = local_y + blockDim.x;
 	int pid;
 	int last_point = (point_num / blockDim.x) * blockDim.x;	// Exclude the last block
 	float dist;
@@ -88,9 +90,9 @@ __global__ void edgeCount(float *x, float *y, float *z, int point_num, int *edge
 
 __global__ void buildEdgeSet(float *x, float *y, float *z, int point_num, int *edge_count, int2 *edge_set, float threshold)
 {
-	__shared__ float local_x[BLOCK_SIZE_X];
-	__shared__ float local_y[BLOCK_SIZE_X];
-	__shared__ float local_z[BLOCK_SIZE_X];
+	float *local_x = local_buff;
+	float *local_y = local_x + blockDim.x;
+	float *local_z = local_y + blockDim.x;
 	int pid;
 	int last_point = (point_num / blockDim.x) * blockDim.x;
 	int2 new_edge;
@@ -220,14 +222,14 @@ void GpuEuclideanCluster2::extractClusters3()
 
 	int block_x, grid_x;
 
-	block_x = (point_num_ > BLOCK_SIZE_X) ? BLOCK_SIZE_X : point_num_;
+	block_x = (point_num_ > block_size_x_) ? block_size_x_ : point_num_;
 	grid_x = (point_num_ - 1) / block_x + 1;
 
 	int *edge_count;
 
 	checkCudaErrors(cudaMalloc(&edge_count, sizeof(int) * (point_num_ + 1)));
 
-	edgeCount<<<grid_x, block_x>>>(x_, y_, z_, point_num_, edge_count, threshold_);
+	edgeCount<<<grid_x, block_x, sizeof(float) * block_size_x_ * 3>>>(x_, y_, z_, point_num_, edge_count, threshold_);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 
@@ -238,13 +240,14 @@ void GpuEuclideanCluster2::extractClusters3()
 	if (edge_num == 0) {
 		checkCudaErrors(cudaFree(edge_count));
 		cluster_num_ = 0;
+		return;
 	}
 
 	int2 *edge_set;
 
 	checkCudaErrors(cudaMalloc(&edge_set, sizeof(int2) * edge_num));
 
-	buildEdgeSet<<<grid_x, block_x>>>(x_, y_, z_, point_num_, edge_count, edge_set, threshold_);
+	buildEdgeSet<<<grid_x, block_x, sizeof(float) * block_size_x_ * 3>>>(x_, y_, z_, point_num_, edge_count, edge_set, threshold_);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 
@@ -253,10 +256,11 @@ void GpuEuclideanCluster2::extractClusters3()
 
 	checkCudaErrors(cudaMalloc(&changed, sizeof(bool)));
 
-	block_x = (edge_num > BLOCK_SIZE_X) ? BLOCK_SIZE_X : edge_num;
+	block_x = (edge_num > block_size_x_) ? block_size_x_ : edge_num;
 	grid_x = (edge_num - 1) / block_x + 1;
 
 	int itr = 0;
+
 
 	do {
 		hchanged = false;
@@ -278,7 +282,7 @@ void GpuEuclideanCluster2::extractClusters3()
 	checkCudaErrors(cudaMalloc(&count, sizeof(int) * (point_num_ + 1)));
 	checkCudaErrors(cudaMemset(count, 0, sizeof(int) * (point_num_ + 1)));
 
-	block_x = (point_num_ > BLOCK_SIZE_X) ? BLOCK_SIZE_X : point_num_;
+	block_x = (point_num_ > block_size_x_) ? block_size_x_ : point_num_;
 	grid_x = (point_num_ - 1) / block_x + 1;
 
 	clusterCount<<<grid_x, block_x>>>(cluster_name_, count, point_num_);

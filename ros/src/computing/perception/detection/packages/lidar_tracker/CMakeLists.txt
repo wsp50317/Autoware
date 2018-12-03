@@ -212,7 +212,7 @@ if (${CUDA_FOUND})
 endif ()
 
 #Euclidean Cluster
-add_executable(euclidean_cluster nodes/euclidean_cluster/euclidean_cluster.cpp nodes/euclidean_cluster/Cluster.cpp)
+add_executable(euclidean_cluster nodes/euclidean_cluster/euclidean_cluster.cpp nodes/euclidean_cluster/Cluster.cpp nodes/euclidean_cluster/gpuectest.cpp)
 
 find_package(CUDA)
 if (${CUDA_FOUND})
