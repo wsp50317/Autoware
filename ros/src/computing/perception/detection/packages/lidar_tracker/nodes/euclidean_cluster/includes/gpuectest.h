@@ -7,10 +7,13 @@ class GPUECTest {
 public:
 	GPUECTest();
 
-	// For testing only
+	// Sparse graph test
 	static void sparseGraphTest();
 
-	// For testing only
+	// Cluster number variation
+	static void clusterNumVariationTest();
+
+	// Load-imbalance test
 	static void imbalanceTest();
 
 private:
@@ -32,6 +35,8 @@ private:
 	static void sparseGraphTest125();
 
 	static void sparseGraphTest0();
+
+	static void clusterNumVariationTest(int cluster_num);
 };
 
 #ifndef timeDiff

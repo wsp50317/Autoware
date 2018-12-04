@@ -15,6 +15,8 @@
 
 void GPUECTest::sparseGraphTest()
 {
+	std::cout << "********** SPARSE GRAPH TEST *************" << std::endl;
+
 	sparseGraphTest100();
 
 	sparseGraphTest875();
@@ -32,6 +34,8 @@ void GPUECTest::sparseGraphTest()
 	sparseGraphTest125();
 
 	sparseGraphTest0();
+
+	std::cout << "*********** END OF SPARSE GRAPH TEST **********" << std::endl << std::endl;
 }
 
 void GPUECTest::sparseGraphTest100()
@@ -725,14 +729,20 @@ void GPUECTest::sparseGraphTest0()
 
 	for (int i = 0; i < sample_cloud->points.size(); i++) {
 		if (i % 3 == 0)
-			sample_point.x += d_th;
+			sample_point.x += d_th + 1;
 		else if (i % 3 == 1)
-			sample_point.x += d_th;
+			sample_point.y += d_th + 1;
 		else
-			sample_point.z += d_th;
+			sample_point.z += d_th + 1;
+
+		if (i == 1)
+			std::cout << "Point[1]=" << sample_point.x << "," << sample_point.y << "," << sample_point.z << std::endl;
+		else if (i == 2)
+			std::cout << "Point[2]=" << sample_point.x << "," << sample_point.y << "," << sample_point.z << std::endl;
 
 		sample_cloud->points[i] = sample_point;
 	}
+
 
 	test_sample.setInputPoints(sample_cloud);
 
@@ -758,3 +768,87 @@ void GPUECTest::sparseGraphTest0()
 	std::cout << "Density 0% - Edge-based: " << timeDiff(start, end) << std::endl;
 }
 
+
+void GPUECTest::clusterNumVariationTest()
+{
+	std::cout << "********* CLUSTER NUMBER VARIATION TEST ***********" << std::endl;
+	for (int cluster_num = 1; cluster_num <= SAMPLE_SIZE_; cluster_num *= 2) {
+		clusterNumVariationTest(cluster_num);
+	}
+
+	std::cout << "****** END OF CLUSTER NUMBER VARIATION TEST *******" << std::endl;
+
+}
+
+void GPUECTest::clusterNumVariationTest(int cluster_num)
+{
+	srand(time(NULL));
+
+	pcl::PointCloud<pcl::PointXYZ>::Ptr sample_cloud(new pcl::PointCloud<pcl::PointXYZ>());
+
+	sample_cloud->points.insert(sample_cloud->points.begin(), SAMPLE_SIZE_, pcl::PointXYZ(0, 0, 0));
+
+	int points_per_cluster = SAMPLE_SIZE_ / cluster_num;
+	pcl::PointXYZ origin(0, 0, 0);
+	float sample_dist;
+	pcl::PointXYZ sample_point;
+	std::vector<bool> status(SAMPLE_SIZE_, false);
+	float d_th = 1.0;
+
+	for (int i = 0; i < cluster_num; i++) {
+
+		for (int j = 0; j < points_per_cluster; j++) {
+			int pid = 0;
+
+			while (status[pid]) {
+				pid = rand() % SAMPLE_SIZE_;
+			}
+
+
+			sample_dist = rand() % SAMPLE_RAND_;
+			sample_point.x = origin.x + sample_dist / SAMPLE_DIST_;
+
+			sample_dist = rand() % SAMPLE_RAND_;
+			sample_point.y = origin.y + sample_dist / SAMPLE_DIST_;
+
+			sample_dist = rand() % SAMPLE_RAND_;
+			sample_point.z = origin.z + sample_dist / SAMPLE_DIST_;
+
+			sample_cloud->points[pid] = sample_point;
+			status[pid] = true;
+		}
+
+		origin.x += d_th * 10;
+		origin.y += d_th * 10;
+		origin.z += d_th * 10;
+	}
+
+	GpuEuclideanCluster2 test_sample;
+
+	test_sample.setBlockSizeX(1024);
+	test_sample.setThreshold(d_th);
+	test_sample.setInputPoints(sample_cloud);
+
+	struct timeval start, end;
+
+	gettimeofday(&start, NULL);
+	test_sample.extractClusters();
+	test_sample.getOutput();
+	gettimeofday(&end, NULL);
+
+	std::cout << "Cluster num " << cluster_num << " - Matrix-based: " << timeDiff(start, end) << std::endl;
+
+	gettimeofday(&start, NULL);
+	test_sample.extractClusters2();
+	test_sample.getOutput();
+	gettimeofday(&end, NULL);
+
+	std::cout << "Cluster num " << cluster_num << " - Vertex-based: " << timeDiff(start, end) << std::endl;
+
+	gettimeofday(&start, NULL);
+	test_sample.extractClusters3();
+	test_sample.getOutput();
+	gettimeofday(&end, NULL);
+
+	std::cout << "Cluster num " << cluster_num << " - Edge-based: " << timeDiff(start, end) << std::endl << std::endl;
+}

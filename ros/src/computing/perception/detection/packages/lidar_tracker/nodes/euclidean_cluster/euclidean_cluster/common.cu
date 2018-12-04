@@ -53,9 +53,9 @@ __global__ void convertFormat(pcl::PointXYZ *input, float *out_x, float *out_y, 
 		pcl::PointXYZ tmp_input = input[i];
 		out_x[i] = tmp_input.x;
 		out_y[i] = tmp_input.y;
-		//out_z[i] = tmp_input.z;
+		out_z[i] = tmp_input.z;
 		// Convert to 2d cloud
-		out_z[i] = 0;
+		// out_z[i] = 0;
 	}
 }
 

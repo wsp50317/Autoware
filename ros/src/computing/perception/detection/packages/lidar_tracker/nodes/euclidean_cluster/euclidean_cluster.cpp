@@ -657,8 +657,9 @@ void segmentByDistance(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_cloud_ptr,
 
 
 	if (test_gpu) {
-		std::cout << std::endl << "SPARSE GRAPH TEST" << std::endl;
-		GPUECTest::sparseGraphTest();
+		//GPUECTest::sparseGraphTest();
+
+		GPUECTest::clusterNumVariationTest();
 		test_gpu = false;
 	}
 

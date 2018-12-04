@@ -375,11 +375,44 @@ void GpuEuclideanCluster2::extractClusters()
 
 	gettimeofday(&end, NULL);
 
-	std::cout << "Collect remaining clusters: " << timeDiff(start, end) << std::endl << std::endl;
+	std::cout << "Collect remaining clusters: " << timeDiff(start, end) << std::endl;
 
 	cluster_num_ = current_cluster_num;
 
 	std::cout << "Cluster num = " << cluster_num_ << std::endl;
+
+	if (cluster_num_ == 21856) {
+		float *x, *y, *z;
+
+		x = (float*)malloc(sizeof(float) * point_num_);
+		y = (float*)malloc(sizeof(float) * point_num_);
+		z = (float*)malloc(sizeof(float) * point_num_);
+
+		checkCudaErrors(cudaMemcpy(x, x_, sizeof(float) * point_num_, cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpy(y, y_, sizeof(float) * point_num_, cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpy(z, z_, sizeof(float) * point_num_, cudaMemcpyDeviceToHost));
+
+			int *test = (int*)malloc(sizeof(int) * (point_num_ + 1));
+
+			checkCudaErrors(cudaMemcpy(test, cluster_name_, sizeof(int) * point_num_, cudaMemcpyDeviceToHost));
+
+			for (int i = 0; i < point_num_; i++) {
+				for (int j = i + 1; j < point_num_; j++) {
+					if (test[i] == test[j])
+						std::cout << "Point[" << i << "]=" << x[i] << "," << y[i] << "," << z[i] << " and point[" << j << "]=" << x[j] << "," << y[j] << "," << z[j] << std::endl;
+				}
+			}
+
+			checkCudaErrors(cudaMemcpy(test, cluster_location, sizeof(int) * (point_num_ + 1), cudaMemcpyDeviceToHost));
+
+			for (int i = 0; i < point_num_; i++) {
+				if (test[i] + 1 != test[i + 1]) {
+					std::cout << "Wrong result at i = " << i << std::endl;
+				}
+			}
+
+			free(test);
+	}
 
 
 	gettimeofday(&start, NULL);
@@ -388,6 +421,11 @@ void GpuEuclideanCluster2::extractClusters()
 
 	checkCudaErrors(cudaMalloc(&matrix, sizeof(int) * cluster_num_ * cluster_num_));
 	checkCudaErrors(cudaMemset(matrix, 0, sizeof(int) * cluster_num_ * cluster_num_));
+	checkCudaErrors(cudaDeviceSynchronize());
+
+	gettimeofday(&end, NULL);
+
+	std::cout << "Malloc and memset = " << timeDiff(start, end) << std::endl;
 
 	dim3 grid_size, block_size;
 
@@ -398,6 +436,7 @@ void GpuEuclideanCluster2::extractClusters()
 	grid_size.z = 1;
 	//grid_size.y = 1;
 
+	gettimeofday(&start, NULL);
 	buildClusterMatrix<<<grid_size, block_size>>>(x_, y_, z_, cluster_name_,
 													cluster_location, matrix,
 													point_num_, cluster_num_,
@@ -429,9 +468,15 @@ void GpuEuclideanCluster2::extractClusters()
 		block_x2 = (cluster_num_ > block_size_x_) ? block_size_x_ : cluster_num_;
 		grid_x2 = (cluster_num_ - 1) / block_x2 + 1;
 
+		struct timeval istart, iend;
+
+		gettimeofday(&istart, NULL);
 		mergeLocalClusters<<<grid_x2, block_x2, sizeof(int) * 2 * block_size_x_ + sizeof(bool)>>>(cluster_list, matrix, cluster_num_, check);
 		checkCudaErrors(cudaGetLastError());
 		checkCudaErrors(cudaDeviceSynchronize());
+		gettimeofday(&iend, NULL);
+
+		std::cout << "Merge Local Cluster = " << timeDiff(istart, iend) << std::endl;
 
 		int sub_matrix_size = 1;
 		int sub_matrix_offset = 2;
@@ -439,7 +484,6 @@ void GpuEuclideanCluster2::extractClusters()
 		checkCudaErrors(cudaMemcpy(&hcheck, check, sizeof(bool), cudaMemcpyDeviceToHost));
 
 		int inner_itr_num = 0;
-		struct timeval istart, iend;
 
 		std::cout << "Inner Cluster Num = " << cluster_num_ << std::endl;
 
@@ -471,6 +515,7 @@ void GpuEuclideanCluster2::extractClusters()
 			std::cout << "block_x = " << block_x2 << std::endl;
 			std::cout << "grid_x = " << grid_x2 << std::endl;
 			std::cout << "grid_y = " << grid_y2 << std::endl;
+
 			std::cout << "Inner Check = " << timeDiff(istart, iend) << std::endl;
 
 
@@ -503,6 +548,7 @@ void GpuEuclideanCluster2::extractClusters()
 		 * rebuild the matrix, the cluster location, and apply those changes to the cluster_name array
 		 */
 
+		gettimeofday(&istart, NULL);
 		if (hcheck) {
 			// Apply changes to the cluster_name array
 			applyClusterChanged<<<grid_x, block_x>>>(cluster_name_, cluster_list, cluster_location, point_num_);
@@ -553,6 +599,10 @@ void GpuEuclideanCluster2::extractClusters()
 			matrix = new_matrix;
 		}
 
+		gettimeofday(&iend, NULL);
+
+		std::cout << "Collapse array = " << timeDiff(istart, iend) << std::endl;
+
 
 		itr++;
 	} while (hcheck);
@@ -571,4 +621,6 @@ void GpuEuclideanCluster2::extractClusters()
 	checkCudaErrors(cudaFree(cluster_location));
 	checkCudaErrors(cudaFree(check));
 	checkCudaErrors(cudaFree(changed_diag));
+
+	std::cout << "FINAL CLUSTER NUM = " << cluster_num_ << std::endl;
 }

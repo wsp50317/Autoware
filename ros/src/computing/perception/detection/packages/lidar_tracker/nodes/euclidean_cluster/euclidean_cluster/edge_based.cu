@@ -300,4 +300,6 @@ void GpuEuclideanCluster2::extractClusters3()
 	checkCudaErrors(cudaFree(edge_set));
 	checkCudaErrors(cudaFree(changed));
 	checkCudaErrors(cudaFree(count));
+
+	std::cout << "FINAL CLUSTER NUM = " << cluster_num_ << std::endl;
 }

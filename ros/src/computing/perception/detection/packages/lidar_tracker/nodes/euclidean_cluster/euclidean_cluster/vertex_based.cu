@@ -401,5 +401,7 @@ void GpuEuclideanCluster2::extractClusters2()
 	checkCudaErrors(cudaFreeHost(changed));
 #endif
 	checkCudaErrors(cudaFree(cluster_location));
+
+	std::cout << "FINAL CLUSTER NUM = " << cluster_num_ << std::endl;
 }
 
