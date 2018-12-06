@@ -28,67 +28,73 @@
  *  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef NAIVE_MOTION_PREDICT_H
-#define NAIVE_MOTION_PREDICT_H
+#ifndef _VISUALIZEDETECTEDOBJECTS_H
+#define _VISUALIZEDETECTEDOBJECTS_H
+
+#include <vector>
+#include <string>
+#include <sstream>
+#include <cmath>
+#include <iomanip>
 
 #include <ros/ros.h>
-
 #include <tf/transform_datatypes.h>
 
+#include <std_msgs/Header.h>
+
 #include <visualization_msgs/MarkerArray.h>
+#include <visualization_msgs/Marker.h>
 
 #include "autoware_msgs/DetectedObject.h"
 #include "autoware_msgs/DetectedObjectArray.h"
 
-enum MotionModel : int
-{
-  CV = 0,    // constant velocity
-  CTRV = 1,  // constant turn rate and velocity
-  RM = 2,    // random motion
-};
+#define __APP_NAME__ "visualize_detected_objects"
 
-class NaiveMotionPredict
+class VisualizeDetectedObjects
 {
 private:
-  // nodehandle
-  ros::NodeHandle nh_;
-  ros::NodeHandle private_nh_;
+  const double arrow_height_;
+  const double label_height_;
+  const double object_max_linear_size_ = 50.;
+  double object_speed_threshold_;
+  double arrow_speed_threshold_;
+  double marker_display_duration_;
 
-  // max prediction score
-  const double MAX_PREDICTION_SCORE_;
+  int marker_id_;
 
-  // ros publisher
-  ros::Publisher predicted_objects_pub_;
-  ros::Publisher predicted_paths_pub_;
+  std_msgs::ColorRGBA label_color_, box_color_, hull_color_, arrow_color_, centroid_color_;
 
-  // ros Subscriber
-  ros::Subscriber detected_objects_sub_;
+  std::string input_topic_, ros_namespace_;
 
-  // prediction param
-  double interval_sec_;
-  int num_prediction_;
-  double sensor_height_;
+  ros::NodeHandle node_handle_;
+  ros::Subscriber subscriber_detected_objects_;
 
-  void objectsCallback(const autoware_msgs::DetectedObjectArray& input);
+  ros::Publisher publisher_markers_;
 
-  void initializeROSmarker(const std_msgs::Header& header, const geometry_msgs::Point& position, const int object_id,
-                           visualization_msgs::Marker& predicted_line);
+  visualization_msgs::MarkerArray ObjectsToLabels(const autoware_msgs::DetectedObjectArray &in_objects);
 
-  void makePrediction(const autoware_msgs::DetectedObject& object,
-                      std::vector<autoware_msgs::DetectedObject>& predicted_objects,
-                      visualization_msgs::Marker& predicted_line);
+  visualization_msgs::MarkerArray ObjectsToArrows(const autoware_msgs::DetectedObjectArray &in_objects);
 
-  autoware_msgs::DetectedObject generatePredictedObject(const autoware_msgs::DetectedObject& object);
+  visualization_msgs::MarkerArray ObjectsToBoxes(const autoware_msgs::DetectedObjectArray &in_objects);
 
-  autoware_msgs::DetectedObject moveConstantVelocity(const autoware_msgs::DetectedObject& object);
+  visualization_msgs::MarkerArray ObjectsToHulls(const autoware_msgs::DetectedObjectArray &in_objects);
 
-  autoware_msgs::DetectedObject moveConstantTurnRateVelocity(const autoware_msgs::DetectedObject& object);
+  visualization_msgs::MarkerArray ObjectsToCentroids(const autoware_msgs::DetectedObjectArray &in_objects);
 
-  double generateYawFromQuaternion(const geometry_msgs::Quaternion& quaternion);
+  std::string ColorToString(const std_msgs::ColorRGBA &in_color);
+
+  void DetectedObjectsCallback(const autoware_msgs::DetectedObjectArray &in_objects);
+
+  bool IsObjectValid(const autoware_msgs::DetectedObject &in_object);
+
+  float CheckColor(double value);
+
+  float CheckAlpha(double value);
+
+  std_msgs::ColorRGBA ParseColor(const std::vector<double> &in_color);
 
 public:
-  NaiveMotionPredict();
-  ~NaiveMotionPredict();
+  VisualizeDetectedObjects();
 };
 
-#endif  // NAIVE_MOTION_PREDICT_H
+#endif  // _VISUALIZEDETECTEDOBJECTS_H

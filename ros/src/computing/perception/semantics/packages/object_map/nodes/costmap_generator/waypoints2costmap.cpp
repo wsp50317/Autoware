@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2018, Tokyo University
+ *  Copyright (c) 2018, Nagoya University
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -26,21 +26,21 @@
  *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
  *  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  *  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- ********************
- *  v1.0: Yuki Tsuji (yukitsuji020832@gmail.com)
- *
- *  Created on: Aug 8th, 2018
- */
+ ********************/
 
-#include "vision_beyond_track.h"
+#include "waypoints2costmap.h"
 
-int main(int argc, char **argv)
+
+// Constructor
+Waypoints2Costmap::Waypoints2Costmap()
 {
-  ros::init(argc, argv, "vision_beyond_track");
+}
 
-  BeyondTrackerNode app;
+Waypoints2Costmap::~Waypoints2Costmap() {}
 
-  app.Run();
-
-  return 0;
+grid_map::Matrix Waypoints2Costmap::makeCostmapFromWaypoints(const grid_map::GridMap& costmap,
+                                                              const std::string& gridmap_layer_name,
+                                                              const autoware_msgs::LaneArray::ConstPtr& in_waypoints)
+{
+  return costmap[gridmap_layer_name];
 }

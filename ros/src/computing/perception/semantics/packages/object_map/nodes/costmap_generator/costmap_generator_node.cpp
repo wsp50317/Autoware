@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2018, Tokyo University
+ *  Copyright (c) 2018, Nagoya University
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -27,20 +27,18 @@
  *  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  *  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  ********************
- *  v1.0: Yuki Tsuji (yukitsuji020832@gmail.com)
- *
- *  Created on: Aug 8th, 2018
  */
+// #include <ros/ros.h>
 
-#include "vision_beyond_track.h"
+#include "costmap_generator.h"
 
 int main(int argc, char **argv)
 {
-  ros::init(argc, argv, "vision_beyond_track");
-
-  BeyondTrackerNode app;
-
-  app.Run();
+  ros::init(argc, argv, "costmap_generator");
+  CostmapGenerator costmap_generator;
+  costmap_generator.init();
+  costmap_generator.run();
+  ros::spin();
 
   return 0;
 }

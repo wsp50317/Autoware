@@ -26,46 +26,34 @@
  *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
  *  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  *  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+ ********************/
+#ifndef OBJECTS2COSTMAP_H
+#define OBJECTS2COSTMAP_H
 
-#ifndef OBJECT_TRACKING_VISUALIZEDETECTEDOBJECTS_H
-#define OBJECT_TRACKING_VISUALIZEDETECTEDOBJECTS_H
-
+// headers in ROS
 #include <ros/ros.h>
-#include <std_msgs/Header.h>
+#include <grid_map_ros/grid_map_ros.hpp>
 
-#include <jsk_recognition_msgs/BoundingBox.h>
-#include <jsk_recognition_msgs/BoundingBoxArray.h>
-
-#include <pcl/io/io.h>
-
-#include <vector>
-#include <string>
-
-#include "autoware_msgs/DetectedObject.h"
+// headers in local directory
 #include "autoware_msgs/DetectedObjectArray.h"
 
-class VisualizeDetectedObjects
+class Objects2Costmap
 {
-private:
-  const double vis_arrow_height_;
-  const double vis_id_height_;
-  double ignore_velocity_thres_;
-  double visualize_arrow_velocity_thres_;
-  std::string input_topic_;
-  std::string pointcloud_frame_;
+  public:
+    Objects2Costmap();
+    ~Objects2Costmap();
 
-  ros::NodeHandle node_handle_;
-  ros::Subscriber sub_object_array_;
+    grid_map::Matrix makeCostmapFromObjects(const grid_map::GridMap& costmap,
+                                             const std::string& gridmap_layer_name,
+                                             const autoware_msgs::DetectedObjectArray::ConstPtr& in_objects);
+  private:
+    const int NUMBER_OF_POINTS;
+    const int NUMBER_OF_DIMENSIONS;
+    Eigen::MatrixXd makeRectanglePoints(const autoware_msgs::DetectedObject& in_object);
+    grid_map::Polygon makePolygonFromObject(const autoware_msgs::DetectedObject& in_object);
+    void setCostInPolygon(const grid_map::Polygon& polygon,const std::string& gridmap_layer_name,
+                           const float score, grid_map::GridMap& objects_costmap);
 
-  ros::Publisher pub_arrow_;
-  ros::Publisher pub_id_;
-
-  void visMarkers(const autoware_msgs::DetectedObjectArray& input);
-  void callBack(const autoware_msgs::DetectedObjectArray& input);
-
-public:
-  VisualizeDetectedObjects();
 };
 
-#endif  // OBJECT_TRACKING_VISUALIZEDETECTEDOBJECTS_H
+#endif  // OBJECTS2COSTMAP_H
