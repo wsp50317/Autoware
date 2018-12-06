@@ -10,6 +10,7 @@ find_package(
   geometry_msgs
   rosconsole
   autoware_msgs
+  ds4_msgs
 )
 
 catkin_package(
@@ -18,6 +19,7 @@ catkin_package(
   geometry_msgs
   rosconsole
   autoware_msgs
+  ds4_msgs
 )
 
 IF ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "aarch64")
@@ -31,12 +33,6 @@ include_directories(
   include
 )
 
-IF (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.1)
-  set(LIB_VERSION 2.0) # _GLIBCXX_USE_CXX11_ABI is 1
-ELSE ()
-  set(LIB_VERSION 1.0) # _GLIBCXX_USE_CXX11_ABI is 0
-ENDIF ()
-
 add_executable(g30esli_interface
   node/g30esli_interface/g30esli_interface.cpp
 )
@@ -47,5 +43,5 @@ add_dependencies(g30esli_interface
 
 target_link_libraries(g30esli_interface
   ${catkin_LIBRARIES}
-  ${CMAKE_CURRENT_SOURCE_DIR}/lib/libymc_can_${LIB_VERSION}${LIB_ARCH}.a
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/libg30esli${LIB_ARCH}.a
 )
