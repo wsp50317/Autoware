@@ -71,7 +71,7 @@ public:
                                    const std::string& dilation_kernel_med_str="CROSS_KERNEL_5",
                                    const std::string& dilation_kernel_near_str="CROSS_KERNEL_7");
 
-private:
+protected:
   /*
     Dictionary to keep dilation kernels with their name.
     Valid names are:

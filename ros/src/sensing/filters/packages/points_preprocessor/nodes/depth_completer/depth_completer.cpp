@@ -10,6 +10,7 @@
 #include <cv_bridge/cv_bridge.h>
 
 #include "depth_completer_core.hpp"
+#include "depth_completer_core_gpu.hpp"
 
 //#include <chrono>
 
@@ -20,6 +21,7 @@ namespace {
   const std::string kAppArgInputFillType = "fill_type";      // argument name for `fill_type` flag. Default: "multiscale"
   const std::string kAppArgInputExtrapolate = "extrapolate"; // argument name for `extrapolate` flag. Default: false
   const std::string kAppArgInputBlurType = "blur_type";      // argument name for 'blur_type' flag. Default: "bilateral"
+  const std::string kAppArgInputUseGPU = "use_gpu";          // argument name for 'use_gpu' flag. Default: true
 
   // Utility class to wrap ROS stuff
   class RosWrapper {
@@ -30,12 +32,17 @@ namespace {
     RosWrapper() :
       fill_type_("multiscale"),
       extrapolate_(false),
-      blur_type_("bilateral") {
+      blur_type_("bilateral"),
+      use_gpu_(true) {
       // Get execution parameters
       GetExecutionParams();
 
       // Construct core class
-      depth_completer_.reset(new DepthCompleter());
+      if (use_gpu_) {
+        depth_completer_gpu_.reset(new DepthCompleterGPU());
+      } else {
+        depth_completer_.reset(new DepthCompleter());
+      }
 
       // Register Subscriber
       ROS_INFO_STREAM("[" << kAppName << "] Subscribing to... " << image_topic_name_.c_str());
@@ -67,9 +74,11 @@ namespace {
     std::string fill_type_;
     bool extrapolate_;
     std::string blur_type_;
+    bool use_gpu_;
 
     // The core class instance of Depth completion
     std::unique_ptr<DepthCompleter> depth_completer_;
+    std::unique_ptr<DepthCompleterGPU> depth_completer_gpu_;
 
     //
     // Function to get execution paramters
@@ -93,6 +102,10 @@ namespace {
                                         blur_type_,
                                         "bilateral");
 
+      private_handle.param<bool>(kAppArgInputUseGPU,
+                                 use_gpu_,
+                                 true);
+
     }  // void GetExecutionParams()
 
 
@@ -112,13 +125,25 @@ namespace {
       // Execute completion core
       cv::Mat final_depths;
       if (fill_type_ == "fast") {
+        if (use_gpu_) {
+          final_depths = depth_completer_gpu_->FillInFast(projected_depths,
+                                                          extrapolate_,
+                                                          blur_type_);
+        } else {
         final_depths = depth_completer_->FillInFast(projected_depths,
                                                     extrapolate_,
                                                     blur_type_);
+        }
       } else if (fill_type_ == "multiscale") {
+        if (use_gpu_) {
+          final_depths = depth_completer_gpu_->FillInMultiScale(projected_depths,
+                                                                extrapolate_,
+                                                                blur_type_);
+        } else {
         final_depths = depth_completer_->FillInMultiScale(projected_depths,
                                                           extrapolate_,
                                                           blur_type_);
+        }
       } else {
         std::invalid_argument("Invalid fill_type: " + fill_type_);
       }

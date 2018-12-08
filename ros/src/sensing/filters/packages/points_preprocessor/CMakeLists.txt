@@ -32,6 +32,7 @@ find_package(Qt5Core REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(PCL 1.7 REQUIRED)
 find_package(OpenMP)
+find_package(CUDA REQUIRED)
 
 # Resolve system dependency on yaml-cpp, which apparently does not
 # provide a CMake find_package() module.
@@ -173,18 +174,45 @@ file(GLOB
   depth_completer_srcs
   nodes/depth_completer/*.cpp)
 
-add_executable(depth_completer
-  ${depth_completer_srcs}
-  )
+if (CUDA_FOUND)
+  list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
+  file(GLOB
+    depth_completer_cuda_srcs
+    nodes/depth_completer/*.cu
+    )
 
-target_include_directories(depth_completer PRIVATE
-  ${OpenCV_INCLUDE_DIRS}
-  )
+  cuda_add_executable(depth_completer
+    ${depth_completer_srcs}
+    ${depth_completer_cuda_srcs}
+    )
 
-target_link_libraries(depth_completer
-  ${catkin_LIBRARIES}
-  ${OpenCV_LIBRARIES}
-  )
+  target_include_directories(depth_completer PRIVATE
+    ${CUDA_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
+    )
+
+  target_link_libraries(depth_completer
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBRARIES}
+    ${CUDA_npp_LIBRARY}
+    ${CUDA_nppi_LIBRARY}
+    )
+
+else (CUDA_FOUND)
+
+  add_executable(depth_completer
+    ${depth_completer_srcs}
+    )
+
+  target_include_directories(depth_completer PRIVATE
+    ${OpenCV_INCLUDE_DIRS}
+    )
+
+  target_link_libraries(depth_completer
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBRARIES}
+    )
+endif (CUDA_FOUND)
 
 add_dependencies(depth_completer ${catkin_EXPORTED_TARGETS})
 
