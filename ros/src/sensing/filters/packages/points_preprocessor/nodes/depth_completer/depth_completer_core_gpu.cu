@@ -624,8 +624,181 @@ DepthCompleterGPU::FillInFast(const cv::Mat &depth_map,
                               const std::string& blur_type,
                               const double& max_depth,
                               const std::string& custom_kernel_str) {
-  // TODO: implement
-  return cv::Mat::zeros(depth_map.size(), CV_32F);
+  cv::Mat depths_in = depth_map.clone();
+  const int img_height = depths_in.size().height;
+  const int img_width = depths_in.size().width;
+  const int img_width_in_byte = depths_in.step;
+
+  // Allocate GPU memory if need and copy data
+  if (!is_dev_memory_ready_) {
+    InitializeGPUMemory(depths_in);
+    is_dev_memory_ready_ = true;
+  }
+
+  // Copy input data to GPU memory
+  CUDA_ERROR_CHECK(cudaMemcpy2DAsync(dev_src_,
+                                     buffer_pitch_,
+                                     depths_in.data,
+                                     img_width_in_byte, // pitch of source memory
+                                     img_width_in_byte,
+                                     img_height,
+                                     cudaMemcpyHostToDevice
+                                     ));
+
+  // Calculate binary masks before inversion
+  dim3 block_dim(kNumThreadsPerBlock_, kNumThreadsPerBlock_, 1);
+  dim3 grid_dim(DivRoundUp(img_width, block_dim.x),
+                DivRoundUp(img_height, block_dim.y),
+                1);
+
+  MemoryInfo mem_info = {img_height, img_width, buffer_pitch_};
+
+  // Invert
+  InvertKernel<<<grid_dim, block_dim>>>(dev_src_,  // src
+                                        dev_dst_,  // dst
+                                        mem_info,
+                                        max_depth
+                                        );
+
+  SwitchSrcAndDist();
+
+  // Dilate
+  PerformBasicMorphology(dev_src_,
+                         dev_dst_,
+                         mem_info,
+                         filters_dict_[custom_kernel_str].first, // pointer to the filter
+                         filters_dict_[custom_kernel_str].second, // filter radius
+                         MorphologyType::kDilation);
+
+  SwitchSrcAndDist();
+
+  // Hole closing
+  //   Closing process is defined as :
+  //   dst = close(src, element) = erode(dilate(src, element))
+  PerformBasicMorphology(dev_src_,
+                         dev_dst_,
+                         mem_info,
+                         filters_dict_["FULL_KERNEL_5"].first,  // pointer to the filetr
+                         filters_dict_["FULL_KERNEL_5"].second,  // filter radius
+                         MorphologyType::kDilation
+                         );
+
+  SwitchSrcAndDist();
+
+  PerformBasicMorphology(dev_src_,
+                         dev_dst_,
+                         mem_info,
+                         filters_dict_["FULL_KERNEL_5"].first,  // pointer to the filetr
+                         filters_dict_["FULL_KERNEL_5"].second,  // filter radius
+                         MorphologyType::kErosion
+                         );
+  SwitchSrcAndDist();
+
+  // Fill empty spaces with dilated values
+  PerformBasicMorphology(dev_src_,
+                         dev_work_buffer_,
+                         mem_info,
+                         filters_dict_["FULL_KERNEL_9"].first,
+                         filters_dict_["FULL_KERNEL_9"].second,
+                         MorphologyType::kDilation
+                         );
+
+  CombineKernel<<<grid_dim, block_dim>>>(dev_src_, // true_pixel_src
+                                         dev_work_buffer_, // false_pixel_src
+                                         dev_src_,         // condition_src
+                                         dev_dst_,         // dst
+                                         mem_info);
+  SwitchSrcAndDist();
+
+  // Extend highest pixel to top of image
+  if (extrapolate) {
+    ExtrapolateKernel<<<grid_dim, block_dim>>>(dev_src_,
+                                               dev_dst_,
+                                               mem_info);
+
+    SwitchSrcAndDist();
+
+    // Large Fill
+    PerformBasicMorphology(dev_src_,
+                           dev_work_buffer_,
+                           mem_info,
+                           filters_dict_["FULL_KERNEL_31"].first, // pointer to the fileter
+                           filters_dict_["FULL_KERNEL_31"].second, // filter radius
+                           MorphologyType::kDilation
+                           );
+
+    CombineKernel<<<grid_dim, block_dim>>>(dev_src_, // true_pixel_src
+                                           dev_work_buffer_, // false_pixel_src
+                                           dev_src_,         // condition_src
+                                           dev_dst_,         // dst
+                                           mem_info);
+    SwitchSrcAndDist();
+  }
+
+  // Median blur
+  PerformBasicMorphology(dev_src_,
+                         dev_dst_,
+                         mem_info,
+                         filters_dict_["FULL_KERNEL_5"].first, // pointer to the filter
+                         filters_dict_["FULL_KERNEL_5"].second, // filter radius
+                         MorphologyType::kMedianBlur);
+
+  SwitchSrcAndDist();
+
+  // Bilateral or gaussian blur
+  if (blur_type == "bilateral") {
+    // Bilateral blur
+    BilateralFiltering(dev_src_,
+                       dev_dst_,
+                       mem_info,
+                       5,       // filster radius
+                       1.5,     // sigma_color
+                       2.0      // sigma_space
+                       );
+
+    SwitchSrcAndDist();
+
+  } else if (blur_type == "gaussian") {
+    // Gaussian blur
+    GaussianBlur(dev_src_,
+                 dev_work_buffer_,
+                 mem_info,
+                 NPP_MASK_SIZE_5_X_5);
+
+    CombineKernel<<<grid_dim, block_dim>>>(dev_work_buffer_, // true_pixel_src
+                                           dev_src_, // false_pixel_src
+                                           dev_src_,         // condition_src
+                                           dev_dst_,         // dst
+                                           mem_info);
+
+    SwitchSrcAndDist();
+
+  } else {
+    std::invalid_argument("Invalid blur_type: " + blur_type);
+  }
+
+  // Invert
+  InvertKernel<<<grid_dim, block_dim>>>(dev_src_,  // src
+                                        dev_dst_,  // dst
+                                        mem_info,
+                                        max_depth
+                                        );
+
+  // Wait until all GPU operations are complete
+  //  and then copy result data
+  CUDA_ERROR_CHECK(cudaDeviceSynchronize());
+
+  cv::Mat depths_out = cv::Mat::zeros(depths_in.size(), CV_32F);
+  CUDA_ERROR_CHECK(cudaMemcpy2D(depths_out.data,
+                                img_width_in_byte,
+                                dev_dst_,
+                                buffer_pitch_,
+                                img_width_in_byte,
+                                img_height,
+                                cudaMemcpyDeviceToHost
+                                ));
+  return depths_out;
+
 }  // DepthCompleterGPU::FillInFast()
 
 
