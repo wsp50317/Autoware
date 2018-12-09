@@ -1,6 +1,6 @@
 <!-- Launch file for Depth Completer -->
 <launch>
-  <arg name="input_image_topic" default="/image_cloud"/> <!--The 2D projected point cloud image -->
+  <arg name="input_image_topic" default="/image_cloud"/> <!--The 2D projected point cloud image, output of cloud_projector -->
   <arg name="fill_type" default="multiscale"/>           <!--Complation type. Valid options are: ["multiscale" | "fast"] -->
   <arg name="extrapolate" default="false"/>              <!--The flag whether extrapolation is executed -->
   <arg name="blur_type" default="bilateral"/>             <!--Image blur processing type. Valid options are: ["bilateral | "gaussian"]-->
