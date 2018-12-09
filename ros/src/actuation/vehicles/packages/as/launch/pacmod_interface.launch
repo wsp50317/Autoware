@@ -1,14 +1,42 @@
 <!-- -->
 <launch>
 
-	<arg name="acceleration_limit" default="3.0"/>
-	<arg name="deceleration_limit" default="3.0"/>
-	<arg name="max_curvature_rate" default="0.75"/>
+  <arg name="use_pacmod" default="true" />
+  <arg name="kvaser_device_id" default="43029" />
+  <arg name="kvaser_circuit_id" default="0" />
+  <arg name="pacmod_vehicle_type" default="LEXUS_RX_450H" />
 
-	<node pkg="as" type="pacmod_interface" name="pacmod_interface" output="log">
-		<param name="acceleration_limit" value="$(arg acceleration_limit)"/>
-		<param name="deceleration_limit" value="$(arg deceleration_limit)"/>
-		<param name="max_curvature_rate" value="$(arg max_curvature_rate)"/>
+  <arg name="loop_rate" default="50.0" />
+  <arg name="accel_kp" default="0.1" />
+  <arg name="accel_ki" default="0.0" />
+  <arg name="accel_kd" default="0.0" />
+  <arg name="accel_max" default="0.3" />
+  <arg name="brake_kp" default="0.1" />
+  <arg name="brake_ki" default="0.0" />
+  <arg name="brake_kd" default="0.0" />
+  <arg name="brake_max" default="0.2" />
+  <arg name="brake_deadband" default="1.39" />
+
+  <group ns="pacmod" if="$(arg use_pacmod)">
+    <include file="$(find pacmod3)/launch/pacmod3.launch">
+			<arg name="use_kvaser" value="true" />
+      <arg name="pacmod_vehicle_type" value="$(arg pacmod_vehicle_type)" />
+      <arg name="kvaser_hardware_id" value="$(arg kvaser_hardware_id)" />
+      <arg name="kvaser_circuit_id" value="$(arg kvaser_circuit_id)" />
+    </include>
+  </group>
+
+	<node pkg="as" type="pacmod_interface" name="pacmod_interface" output="screen">
+    <arg name="loop_rate" value="$(arg loop_rate)" />
+    <arg name="accel_kp" value="$(arg accel_kp)" />
+    <arg name="accel_ki" value="$(arg accel_ki)" />
+    <arg name="accel_kd" value="$(arg accel_kd)" />
+    <arg name="accel_max" value="$(arg accel_max)" />
+    <arg name="brake_kp" value="$(arg brake_kp)" />
+    <arg name="brake_ki" value="$(arg brake_ki)" />
+    <arg name="brake_kd" value="$(arg brake_kd)" />
+    <arg name="brake_max" value="$(arg brake_max)" />
+    <arg name="brake_deadband" value="$(arg brake_deadband)" />
 	</node>
 
 </launch>

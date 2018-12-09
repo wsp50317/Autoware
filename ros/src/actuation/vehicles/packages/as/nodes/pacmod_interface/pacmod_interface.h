@@ -31,16 +31,29 @@
 #ifndef PACMOD_INTERFACE_H
 #define PACMOD_INTERFACE_H
 
-// ROS includes
 #include <ros/ros.h>
-#include <std_msgs/Bool.h>
-#include <geometry_msgs/TwistStamped.h>
-#include <automotive_platform_msgs/SteerMode.h>
-#include <automotive_platform_msgs/SpeedMode.h>
-#include <dbw_mkz_msgs/SteeringReport.h>
+#include <message_filters/subscriber.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <message_filters/synchronizer.h>
 
-namespace pacmod
-{
+#include <std_msgs/Bool.h>
+#include <std_msgs/Float64.h>
+
+#include <autoware_msgs/VehicleCmd.h>
+#include <autoware_msgs/VehicleStatus.h>
+
+#include <pacmod_msgs/SystemCmdBool.h>
+#include <pacmod_msgs/SystemCmdInt.h>
+#include <pacmod_msgs/SystemCmdFloat.h>
+#include <pacmod_msgs/SteerSystemCmd.h>
+#include <pacmod_msgs/SystemRptInt.h>
+#include <pacmod_msgs/SystemRptFloat.h>
+#include <pacmod_msgs/VehicleSpeedRpt.h>
+
+#include "pid_controller.h"
+
+const static double WHEEL_BASE = 2.79;
+
 class PacmodInterface
 {
 public:
@@ -50,35 +63,87 @@ public:
   void run();
 
 private:
-  // handle
+  // typedefs
+  typedef message_filters::sync_policies::ApproximateTime<pacmod_msgs::VehicleSpeedRpt, pacmod_msgs::SystemRptFloat>
+      PacmodTwistSyncPolicy;
+
+  // node handles
   ros::NodeHandle nh_;
   ros::NodeHandle private_nh_;
 
-  // publisher
-  ros::Publisher steer_mode_pub_;
-  ros::Publisher speed_mode_pub_;
+  // subscribers from autoware
+  ros::Subscriber vehicle_cmd_sub_;
+  ros::Subscriber engage_cmd_sub_;
+
+  // subscribers from pacmod
+  ros::Subscriber pacmod_enabled_sub_;
+  message_filters::Subscriber<pacmod_msgs::VehicleSpeedRpt>* pacmod_speed_sub_;
+  message_filters::Subscriber<pacmod_msgs::SystemRptFloat>* pacmod_steer_sub_;
+  message_filters::Synchronizer<PacmodTwistSyncPolicy>* pacmod_twist_sync_;
+
+  // publishers to autoware
+  ros::Publisher vehicle_status_pub_;
   ros::Publisher current_twist_pub_;
 
-  // subscriber
-  ros::Subscriber twist_cmd_sub_;
-  ros::Subscriber control_mode_sub_;
-  ros::Subscriber speed_sub_;
+  // publishers to pacmod
+  ros::Publisher pacmod_steer_pub_;
+  ros::Publisher pacmod_accel_pub_;
+  ros::Publisher pacmod_brake_pub_;
+  ros::Publisher pacmod_shift_pub_;
+  ros::Publisher pacmod_turn_pub_;
+  // ros::Publisher pacmod_headlight_pub_;
+  // ros::Publisher pacmod_horn_pub_;
+  // ros::Publisher pacmod_wiper_pub_;
 
-  // ros param
-  double acceleration_limit_;
-  double deceleration_limit_;
-  double max_curvature_rate_;
+  // rosparams
+  double loop_rate_;
+  double accel_kp_, accel_ki_, accel_kd_;
+  double brake_kp_, brake_ki_, brake_kd_;
+  double accel_max_, brake_max_;
+  double brake_deadband_;
 
   // variables
-  bool control_mode_;
+  bool engage_cmd_;
+  bool engage_state_, prev_engage_state_;
 
-  // callbacks
-  void callbackFromTwistCmd(const geometry_msgs::TwistStampedConstPtr &msg);
-  void callbackFromControlMode(const std_msgs::BoolConstPtr &msg);
-  void callbackFromSteeringReport(const dbw_mkz_msgs::SteeringReportConstPtr &msg);
+  bool enable_;
+  bool ignore_overrides_;
+  bool clear_override_;
+  bool clear_faults_;
 
-  // initializer
-  void initForROS();
+  bool init_vehicle_cmd_;
+  double current_speed_, current_steer_;
+  geometry_msgs::TwistStamped current_twist_;
+  autoware_msgs::VehicleCmd vehicle_cmd_;
+
+  pacmod_msgs::SteerSystemCmd pacmod_steer_;
+  pacmod_msgs::SystemCmdFloat pacmod_accel_;
+  pacmod_msgs::SystemCmdFloat pacmod_brake_;
+  pacmod_msgs::SystemCmdInt pacmod_shift_;
+  pacmod_msgs::SystemCmdInt pacmod_turn_;
+
+  ros::Rate* rate_;
+
+  PIDController accel_pid_;
+  PIDController brake_pid_;
+
+  // callbacks from autoware
+  void callbackVehicleCmd(const autoware_msgs::VehicleCmd::ConstPtr& msg);
+  void callbackEngage(const std_msgs::Bool::ConstPtr& msg);
+
+  // callbacks from pacmod
+  void callbackPacmodEnabled(const std_msgs::Bool::ConstPtr& msg);
+  void callbackPacmodTwist(const pacmod_msgs::VehicleSpeedRpt::ConstPtr& speed,
+                           const pacmod_msgs::SystemRptFloat::ConstPtr& steer);
+
+  // functions
+  bool checkInitialized();
+  void updateOverride();
+  void publishPacmodSteer(const autoware_msgs::VehicleCmd& msg);
+  void publishPacmodAccel(const autoware_msgs::VehicleCmd& msg);
+  void publishPacmodBrake(const autoware_msgs::VehicleCmd& msg);
+  void publishPacmodShift(const autoware_msgs::VehicleCmd& msg);
+  void publishPacmodTurn(const autoware_msgs::VehicleCmd& msg);
 };
-}  // pacmod
+
 #endif  // PACMOD_INTERFACE_H

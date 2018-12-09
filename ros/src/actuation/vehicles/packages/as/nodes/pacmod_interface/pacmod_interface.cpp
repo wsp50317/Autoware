@@ -30,94 +30,269 @@
 
 #include "pacmod_interface.h"
 
-namespace pacmod
+PacmodInterface::PacmodInterface()
+  : nh_()
+  , private_nh_("~")
+  , engage_cmd_(false)
+  , engage_state_(false)
+  , prev_engage_state_(false)
+  , enable_(false)
+  , ignore_overrides_(false)
+  , clear_override_(false)
+  , clear_faults_(false)
+  , init_vehicle_cmd_(false)
 {
-// Constructor
-PacmodInterface::PacmodInterface() :
-    private_nh_("~"),
-    control_mode_(false)
-{
-  initForROS();
+  private_nh_.param<double>("loop_rate", loop_rate_, 50.0);
+  private_nh_.param<double>("accel_kp", accel_kp_, 0.0);
+  private_nh_.param<double>("accel_ki", accel_ki_, 0.0);
+  private_nh_.param<double>("accel_kd", accel_kd_, 0.0);
+  private_nh_.param<double>("accel_max", accel_max_, 0.0);
+  private_nh_.param<double>("brake_kp", brake_kp_, 0.0);
+  private_nh_.param<double>("brake_ki", brake_ki_, 0.0);
+  private_nh_.param<double>("brake_kd", brake_kd_, 0.0);
+  private_nh_.param<double>("brake_max", brake_max_, 0.0);
+  private_nh_.param<double>("brake_deadband", brake_deadband_, 0.0);
+
+  rate_ = new ros::Rate(loop_rate_);
+
+  accel_pid_.setGain(accel_kp_, accel_ki_, accel_kd_);
+  brake_pid_.setGain(brake_kp_, brake_ki_, brake_kd_);
+  accel_pid_.setMinMax(0.0, accel_max_);
+  brake_pid_.setMinMax(0.0, brake_max_);
+
+  // from autoware
+  vehicle_cmd_sub_ = nh_.subscribe("vehicle_cmd", 1, &PacmodInterface::callbackVehicleCmd, this);
+  engage_cmd_sub_ = nh_.subscribe("as/engage", 1, &PacmodInterface::callbackEngage, this);
+
+  // from pacmod
+  pacmod_enabled_sub_ = nh_.subscribe("pacmod/as_tx/enabled", 1, &PacmodInterface::callbackPacmodEnabled, this);
+  pacmod_speed_sub_ =
+      new message_filters::Subscriber<pacmod_msgs::VehicleSpeedRpt>(nh_, "pacmod/parsed_tx/vehicle_speed_rpt", 1);
+  pacmod_steer_sub_ =
+      new message_filters::Subscriber<pacmod_msgs::SystemRptFloat>(nh_, "pacmod/parsed_tx/steer_rpt", 1);
+
+  pacmod_twist_sync_ = new message_filters::Synchronizer<PacmodTwistSyncPolicy>(PacmodTwistSyncPolicy(10),
+                                                                                *pacmod_speed_sub_, *pacmod_steer_sub_);
+  pacmod_twist_sync_->registerCallback(boost::bind(&PacmodInterface::callbackPacmodTwist, this, _1, _2));
+
+  // to autoware
+  vehicle_status_pub_ = nh_.advertise<autoware_msgs::VehicleStatus>("vehicle_status", 10);
+  current_twist_pub_ = nh_.advertise<geometry_msgs::TwistStamped>("as_current_twist", 10);
+
+  // to pacmod
+  pacmod_steer_pub_ = nh_.advertise<pacmod_msgs::SteerSystemCmd>("pacmod/as_rx/steer_cmd", 10);
+  pacmod_accel_pub_ = nh_.advertise<pacmod_msgs::SystemCmdFloat>("pacmod/as_rx/accel_cmd", 10);
+  pacmod_brake_pub_ = nh_.advertise<pacmod_msgs::SystemCmdFloat>("pacmod/as_rx/brake_cmd", 10);
+  pacmod_shift_pub_ = nh_.advertise<pacmod_msgs::SystemCmdInt>("pacmod/as_rx/shift_cmd", 10);
+  pacmod_turn_pub_ = nh_.advertise<pacmod_msgs::SystemCmdInt>("pacmod/as_rx/turn_cmd", 10);
+  // pacmod_headlight_pub_ = nh_.advertise<pacmod_msgs::SystemCmdInt>("pacmod/as_rx/headlight_cmd", 10);
+  // pacmod_horn_pub_ = nh_.advertise<pacmod_msgs::SystemCmdBool>("pacmod/as_rx/horn_cmd", 10);
+  // pacmod_wiper_pub_ = nh_.advertise<pacmod_msgs::SystemCmdInt>("pacmod/as_rx/wiper_cmd", 10);
 }
 
-// Destructor
 PacmodInterface::~PacmodInterface()
 {
 }
 
-void PacmodInterface::initForROS()
-{
-  // ros parameter settings
-  private_nh_.param<double>("acceleration_limit", acceleration_limit_, 3.0);
-  private_nh_.param<double>("deceleration_limit", deceleration_limit_, 3.0);
-  private_nh_.param<double>("max_curvature_rate", max_curvature_rate_, 0.75);
-
-  // setup subscriber
-  twist_cmd_sub_    = nh_.subscribe("twist_cmd", 10, &PacmodInterface::callbackFromTwistCmd, this);
-  control_mode_sub_ = nh_.subscribe("/as/control_mode", 10, &PacmodInterface::callbackFromControlMode, this);
-  speed_sub_        = nh_.subscribe("/vehicle/steering_report", 10, &PacmodInterface::callbackFromSteeringReport, this);
-
-  // setup publisher
-  steer_mode_pub_    = nh_.advertise<automotive_platform_msgs::SteerMode>("/as/arbitrated_steering_commands", 10);
-  speed_mode_pub_    = nh_.advertise<automotive_platform_msgs::SpeedMode>("/as/arbitrated_speed_commands", 10);
-  current_twist_pub_ = nh_.advertise<geometry_msgs::TwistStamped>("as_current_twist", 10);
-}
-
 void PacmodInterface::run()
 {
-  ros::spin();
-}
-
-
-void PacmodInterface::callbackFromTwistCmd(const geometry_msgs::TwistStampedConstPtr &msg)
-{
-  int mode;
-  if (control_mode_)
+  while (ros::ok())
   {
-    mode = 1;
+    if (!checkInitialized())
+    {
+      ROS_ERROR("Not initialized, waiting for topics...");
+      ros::Duration(1.0).sleep();
+    }
+
+    updateOverride();
+
+    publishPacmodSteer(vehicle_cmd_);
+    publishPacmodAccel(vehicle_cmd_);
+    publishPacmodBrake(vehicle_cmd_);
+    publishPacmodShift(vehicle_cmd_);
+    publishPacmodTurn(vehicle_cmd_);
+
+    rate_->sleep();
   }
-  else
+}
+
+bool PacmodInterface::checkInitialized()
+{
+  return (init_vehicle_cmd_);
+}
+
+void PacmodInterface::updateOverride()
+{
+  enable_ = engage_cmd_;
+  ignore_overrides_ = false;
+
+  if (engage_cmd_ && !prev_engage_state_)
   {
-    mode = 0;
+    clear_override_ = true;
+    clear_faults_ = true;
+  }
+}
+
+void PacmodInterface::publishPacmodSteer(const autoware_msgs::VehicleCmd& msg)
+{
+  static pacmod_msgs::SteerSystemCmd steer;
+
+  steer.header = msg.header;
+  steer.enable = enable_;
+  steer.ignore_overrides = ignore_overrides_;
+  steer.clear_override = clear_override_;
+  steer.clear_faults = clear_faults_;
+
+  steer.command = msg.ctrl_cmd.steering_angle;
+  // TODO, default max = 3.3, 4.71239 is fast but jerky
+  steer.rotation_rate = 1.0;
+
+  pacmod_steer_pub_.publish(steer);
+}
+
+void PacmodInterface::publishPacmodAccel(const autoware_msgs::VehicleCmd& msg)
+{
+  static pacmod_msgs::SystemCmdFloat accel;
+  static double error;
+
+  accel.header = msg.header;
+  accel.enable = enable_;
+  accel.ignore_overrides = ignore_overrides_;
+  accel.clear_override = clear_override_;
+  accel.clear_faults = clear_faults_;
+
+  error = msg.ctrl_cmd.linear_velocity - current_speed_;
+  if (error >= 0) {
+    accel.command = accel_pid_.update(error, 1.0/loop_rate_);
+  } else {
+    accel_pid_.reset();
+    accel.command = 0.0;
   }
 
-  automotive_platform_msgs::SpeedMode speed_mode;
-  speed_mode.header = msg->header;
-  speed_mode.mode = mode;
-  speed_mode.speed = msg->twist.linear.x;
-  speed_mode.acceleration_limit = 3.0;
-  speed_mode.deceleration_limit = 3.0;
-
-  automotive_platform_msgs::SteerMode steer_mode;
-  steer_mode.header = msg->header;
-  steer_mode.mode = mode;
-  double curvature = msg->twist.angular.z / msg->twist.linear.x;
-  steer_mode.curvature = msg->twist.linear.x <= 0 ? 0 : curvature;
-  steer_mode.max_curvature_rate = 0.75;
-
-  std::cout << "mode: "  << mode << std::endl;
-  std::cout << "speed: " << speed_mode.speed << std::endl;
-  std::cout << "steer: " << steer_mode.curvature << std::endl;
-
-  speed_mode_pub_.publish(speed_mode);
-  steer_mode_pub_.publish(steer_mode);
+  pacmod_accel_pub_.publish(accel);
 }
 
-void PacmodInterface::callbackFromControlMode(const std_msgs::BoolConstPtr &msg)
+void PacmodInterface::publishPacmodBrake(const autoware_msgs::VehicleCmd& msg)
 {
-  control_mode_ = msg->data;
+  static pacmod_msgs::SystemCmdFloat brake;
+  static double error;
+
+  brake.header = msg.header;
+  brake.enable = enable_;
+  brake.ignore_overrides = ignore_overrides_;
+  brake.clear_override = clear_override_;
+  brake.clear_faults = clear_faults_;
+
+  error = msg.ctrl_cmd.linear_velocity - current_speed_;
+  if (error < -brake_deadband_) {
+    brake.command = brake_pid_.update(error, 1.0/loop_rate_);
+  } else {
+    brake_pid_.reset();
+    brake.command = 0.0;
+  }
+
+  pacmod_brake_pub_.publish(brake);
 }
 
-void PacmodInterface::callbackFromSteeringReport(const dbw_mkz_msgs::SteeringReportConstPtr &msg)
+void PacmodInterface::publishPacmodShift(const autoware_msgs::VehicleCmd& msg)
 {
-  geometry_msgs::TwistStamped ts;
-  std_msgs::Header header;
-  header.stamp = ros::Time::now();
-  ts.header = header;
-  ts.twist.linear.x = msg->speed; // [m/sec]
-  // Can we get angular velocity?
+  static pacmod_msgs::SystemCmdInt shift;
 
-  current_twist_pub_.publish(ts);
+  shift.header = msg.header;
+  shift.enable = enable_;
+  shift.ignore_overrides = ignore_overrides_;
+  shift.clear_override = clear_override_;
+  shift.clear_faults = clear_faults_;
+
+  if (msg.gear == 0)
+  {
+    shift.command = pacmod_msgs::SystemCmdInt::SHIFT_PARK;
+  }
+  else if (msg.gear == 1)
+  {
+    shift.command = pacmod_msgs::SystemCmdInt::SHIFT_FORWARD;
+  }
+  else if (msg.gear == 2)
+  {
+    shift.command = pacmod_msgs::SystemCmdInt::SHIFT_REVERSE;
+  }
+  else if (msg.gear == 4)
+  {
+    shift.command = pacmod_msgs::SystemCmdInt::SHIFT_NEUTRAL;
+  }
+
+  pacmod_shift_pub_.publish(shift);
 }
 
-}  // pacmod
+void PacmodInterface::publishPacmodTurn(const autoware_msgs::VehicleCmd& msg)
+{
+  static pacmod_msgs::SystemCmdInt turn;
+
+  turn.header = msg.header;
+  turn.enable = enable_;
+  turn.ignore_overrides = ignore_overrides_;
+  turn.clear_override = clear_override_;
+  turn.clear_faults = clear_faults_;
+
+  if (msg.lamp_cmd.l == 0 && msg.lamp_cmd.r == 0)
+  {
+    turn.command = pacmod_msgs::SystemCmdInt::TURN_NONE;
+  }
+  else if (msg.lamp_cmd.l == 1 && msg.lamp_cmd.r == 0)
+  {
+    turn.command = pacmod_msgs::SystemCmdInt::TURN_LEFT;
+  }
+  else if (msg.lamp_cmd.l == 0 && msg.lamp_cmd.r == 1)
+  {
+    turn.command = pacmod_msgs::SystemCmdInt::TURN_RIGHT;
+  }
+  else if (msg.lamp_cmd.l == 1 && msg.lamp_cmd.r == 1)
+  {
+    turn.command = pacmod_msgs::SystemCmdInt::TURN_HAZARDS;
+  }
+
+  pacmod_turn_pub_.publish(turn);
+}
+
+void PacmodInterface::callbackVehicleCmd(const autoware_msgs::VehicleCmd::ConstPtr& msg)
+{
+  if (!init_vehicle_cmd_)
+  {
+    init_vehicle_cmd_ = true;
+  }
+
+  vehicle_cmd_ = *msg;
+}
+
+void PacmodInterface::callbackEngage(const std_msgs::Bool::ConstPtr& msg)
+{
+  engage_cmd_ = msg->data;
+}
+
+void PacmodInterface::callbackPacmodEnabled(const std_msgs::Bool::ConstPtr& msg)
+{
+  engage_state_ = msg->data;
+
+  if (!engage_state_ && prev_engage_state_)
+  {
+    prev_engage_state_ = false;
+  }
+}
+
+void PacmodInterface::callbackPacmodTwist(const pacmod_msgs::VehicleSpeedRpt::ConstPtr& speed,
+                                          const pacmod_msgs::SystemRptFloat::ConstPtr& steer)
+{
+  static double lv, az;
+
+  current_speed_ = speed->vehicle_speed;
+  current_steer_ = steer->output;
+  lv = current_speed_;
+  az = std::tan(current_steer_) * current_speed_ / WHEEL_BASE;
+
+  current_twist_.header.stamp = steer->header.stamp;
+  current_twist_.header.frame_id = "base_link";
+  current_twist_.twist.linear.x = lv;
+  current_twist_.twist.angular.z = az;
+
+  current_twist_pub_.publish(current_twist_);
+}

@@ -28,17 +28,12 @@
  *  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-// ROS Includes
-#include <ros/ros.h>
-
 #include "pacmod_interface.h"
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
   ros::init(argc, argv, "pacmod_interface");
-  pacmod::PacmodInterface pacmod_interface;
-
-  pacmod_interface.run();
-
+  PacmodInterface node;
+  node.run();
   return 0;
 }
