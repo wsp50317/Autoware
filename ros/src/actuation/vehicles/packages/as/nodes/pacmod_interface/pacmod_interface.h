@@ -103,7 +103,7 @@ private:
   double brake_deadband_;
 
   // variables
-  bool engage_cmd_;
+  bool engage_cmd_, prev_engage_cmd_;
   bool engage_state_, prev_engage_state_;
 
   bool enable_;

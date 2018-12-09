@@ -98,13 +98,13 @@ void PacmodInterface::run()
 {
   while (ros::ok())
   {
+    ros::spinOnce();
+
     if (!checkInitialized())
     {
       ROS_ERROR("Not initialized, waiting for topics...");
       ros::Duration(1.0).sleep();
     }
-
-    updateOverride();
 
     publishPacmodSteer(vehicle_cmd_);
     publishPacmodAccel(vehicle_cmd_);
@@ -121,18 +121,6 @@ bool PacmodInterface::checkInitialized()
   return (init_vehicle_cmd_);
 }
 
-void PacmodInterface::updateOverride()
-{
-  enable_ = engage_cmd_;
-  ignore_overrides_ = false;
-
-  if (engage_cmd_ && !prev_engage_state_)
-  {
-    clear_override_ = true;
-    clear_faults_ = true;
-  }
-}
-
 void PacmodInterface::publishPacmodSteer(const autoware_msgs::VehicleCmd& msg)
 {
   static pacmod_msgs::SteerSystemCmd steer;
@@ -145,7 +133,7 @@ void PacmodInterface::publishPacmodSteer(const autoware_msgs::VehicleCmd& msg)
 
   steer.command = msg.ctrl_cmd.steering_angle;
   // TODO, default max = 3.3, 4.71239 is fast but jerky
-  steer.rotation_rate = 1.0;
+  steer.rotation_rate = 3.0;
 
   pacmod_steer_pub_.publish(steer);
 }
@@ -267,6 +255,22 @@ void PacmodInterface::callbackVehicleCmd(const autoware_msgs::VehicleCmd::ConstP
 void PacmodInterface::callbackEngage(const std_msgs::Bool::ConstPtr& msg)
 {
   engage_cmd_ = msg->data;
+
+  enable_ = engage_cmd_;
+  ignore_overrides_ = false;
+
+  if (engage_cmd_ && !prev_engage_cmd_)
+  {
+    clear_override_ = true;
+    clear_faults_ = true;
+  }
+  else
+  {
+    clear_override_ = false;
+    clear_faults_ = false;
+  }
+
+  prev_engage_cmd_ = engage_cmd_;
 }
 
 void PacmodInterface::callbackPacmodEnabled(const std_msgs::Bool::ConstPtr& msg)
@@ -275,8 +279,10 @@ void PacmodInterface::callbackPacmodEnabled(const std_msgs::Bool::ConstPtr& msg)
 
   if (!engage_state_ && prev_engage_state_)
   {
-    prev_engage_state_ = false;
+    engage_cmd_ = false;
   }
+
+  prev_engage_state_ = engage_state_;
 }
 
 void PacmodInterface::callbackPacmodTwist(const pacmod_msgs::VehicleSpeedRpt::ConstPtr& speed,
